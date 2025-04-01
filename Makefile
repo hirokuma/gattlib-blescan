@@ -8,10 +8,7 @@ export OUTPUT_FILENAME
 MAKEFILE_NAME := $(MAKEFILE_LIST)
 MAKEFILE_DIR := $(dir $(MAKEFILE_NAME) )
 
-MK := mkdir
-RM := rm -rf
-
-#echo suspend
+# echo suspend
 ifeq ("$(VERBOSE)","1")
 NO_ECHO :=
 else
@@ -28,41 +25,43 @@ OBJDUMP  		:= "$(GNU_PREFIX)objdump"
 OBJCOPY  		:= "$(GNU_PREFIX)objcopy"
 SIZE    		:= "$(GNU_PREFIX)size"
 
-#function for removing duplicates in a list
+MK := mkdir
+RM := rm -rf
+
+# function for removing duplicates in a list
 remduplicates = $(strip $(if $1,$(firstword $1) $(call remduplicates,$(filter-out $(firstword $1),$1))))
 
-#sources project
+# sources project
 C_SOURCE_FILES += $(PRJ_PATH)/ble_scan.c
 
-#includes common to all targets
+# includes common to all targets
 INC_PATHS += -I${HOME}/.local/include
+LIB_PATHS += -L${HOME}/.local/lib
 
 LISTING_DIRECTORY = $(OBJECT_DIRECTORY)
 
 # Sorting removes duplicates
 BUILD_DIRECTORIES := $(sort $(OBJECT_DIRECTORY) $(OUTPUT_BINARY_DIRECTORY) $(LISTING_DIRECTORY) )
 
-#flags common to all targets
+# flags common to all targets
 CFLAGS += --std=gnu99
 CFLAGS += -Wall
-CFLAGS += -DVERSION="\"1.0\""
 CFLAGS += `pkg-config --cflags glib-2.0`
 CFLAGS += -DGATTLIB_LOG_LEVEL=3
 
-#Link Library
-LIBS += -L${HOME}/.local/lib -lgattlib -lbluetooth -lreadline
+# Link Library
+LIBS += ${LIB_PATHS} -lgattlib -lbluetooth -lreadline
 LIBS += `pkg-config --libs glib-2.0`
 
-
-#default target - first one defined
+# default target - first one defined
 default: debug 
 
-#building all targets
+# building all targets
 all:
 	$(NO_ECHO)$(MAKE) -f $(MAKEFILE_NAME) -C $(MAKEFILE_DIR) -e cleanobj
 	$(NO_ECHO)$(MAKE) -f $(MAKEFILE_NAME) -C $(MAKEFILE_DIR) -e debug
 
-#target for printing all targets
+# target for printing all targets
 help:
 	@echo following targets are available:
 	@echo 	debug release
@@ -92,7 +91,7 @@ release: $(BUILD_DIRECTORIES) $(OBJECTS)
 	@echo [RELEASE]Linking target: $(OUTPUT_FILENAME)
 	$(ECHO)$(CC) $(LDFLAGS) $(OBJECTS) $(LIBS) -o $(OUTPUT_BINARY_DIRECTORY)/$(OUTPUT_FILENAME)
 
-## Create build directories
+# Create build directories
 $(BUILD_DIRECTORIES):
 	$(MK) $@
 
