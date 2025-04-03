@@ -37,7 +37,7 @@
 
 #define BLE_SCAN_TIMEOUT   10
 
-static const char* adapter_name;
+static const char *adapter_name;
 
 // We use a mutex to make the BLE connections synchronous
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -45,15 +45,15 @@ static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 LIST_HEAD(listhead, connection_t) g_ble_connections;
 struct connection_t {
     pthread_t thread;
-    gattlib_adapter_t* adapter;
-    char* addr;
+    gattlib_adapter_t *adapter;
+    char *addr;
     LIST_ENTRY(connection_t) entries;
 };
 
-static void on_device_connect(gattlib_adapter_t* adapter, const char *dst, gattlib_connection_t* connection, int error, void* user_data)
+static void on_device_connect(gattlib_adapter_t *adapter, const char *dst, gattlib_connection_t *connection, int error, void *user_data)
 {
-    gattlib_primary_service_t* services;
-    gattlib_characteristic_t* characteristics;
+    gattlib_primary_service_t *services;
+    gattlib_characteristic_t *characteristics;
     int services_count, characteristics_count;
     char uuid_str[MAX_LEN_UUID_STR + 1];
     int ret, i;
@@ -94,7 +94,7 @@ disconnect_exit:
 static void *ble_connect_device(void *arg)
 {
     struct connection_t *connection = arg;
-    char* addr = connection->addr;
+    char *addr = connection->addr;
     int ret;
 
     pthread_mutex_lock(&g_mutex);
@@ -110,15 +110,19 @@ static void *ble_connect_device(void *arg)
     return NULL;
 }
 
-static void ble_discovered_device(gattlib_adapter_t* adapter, const char* addr, const char* name, void *user_data)
+static void ble_discovered_device(gattlib_adapter_t *adapter, const char *addr, const char *name, void *user_data)
 {
     struct connection_t *connection;
     int ret;
 
     if (name) {
         printf("Discovered %s - '%s'\n", addr, name);
+        if (strcmp(name, "Local") != 0) {
+            return;
+        }
     } else {
         printf("Discovered %s\n", addr);
+        return;
     }
 
     connection = calloc(sizeof(struct connection_t), 1);
@@ -138,9 +142,9 @@ static void ble_discovered_device(gattlib_adapter_t* adapter, const char* addr, 
     LIST_INSERT_HEAD(&g_ble_connections, connection, entries);
 }
 
-static void* ble_task(void* arg)
+static void *ble_task(void *arg)
 {
-    gattlib_adapter_t* adapter;
+    gattlib_adapter_t *adapter;
     int ret;
 
     ret = gattlib_adapter_open(adapter_name, &adapter);
@@ -163,7 +167,7 @@ static void* ble_task(void* arg)
 
     // Wait for the thread to complete
     while (g_ble_connections.lh_first != NULL) {
-        struct connection_t* connection = g_ble_connections.lh_first;
+        struct connection_t *connection = g_ble_connections.lh_first;
         pthread_join(connection->thread, NULL);
         LIST_REMOVE(g_ble_connections.lh_first, entries);
         free(connection->addr);

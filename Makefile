@@ -16,14 +16,14 @@ NO_ECHO := @
 endif
 
 # Toolchain commands
-CC       		:= "$(GNU_PREFIX)gcc"
-AS       		:= "$(GNU_PREFIX)as"
-AR       		:= "$(GNU_PREFIX)ar" -r
-LD       		:= "$(GNU_PREFIX)ld"
-NM       		:= "$(GNU_PREFIX)nm"
-OBJDUMP  		:= "$(GNU_PREFIX)objdump"
-OBJCOPY  		:= "$(GNU_PREFIX)objcopy"
-SIZE    		:= "$(GNU_PREFIX)size"
+CC       		:= $(GNU_PREFIX)gcc
+AS       		:= $(GNU_PREFIX)as
+AR       		:= $(GNU_PREFIX)ar -r
+LD       		:= $(GNU_PREFIX)ld
+NM       		:= $(GNU_PREFIX)nm
+OBJDUMP  		:= $(GNU_PREFIX)objdump
+OBJCOPY  		:= $(GNU_PREFIX)objcopy
+SIZE    		:= $(GNU_PREFIX)size
 
 MK := mkdir
 RM := rm -rf
@@ -82,13 +82,14 @@ debug: LDFLAGS += -ggdb3 -O0
 debug: $(BUILD_DIRECTORIES) $(OBJECTS)
 	@echo [DEBUG]Linking target: $(OUTPUT_FILENAME)
 	@echo [DEBUG]CFLAGS=$(CFLAGS)
-	$(NO_ECHO)$(CC) $(LDFLAGS) $(OBJECTS) $(LIBS) -o $(OUTPUT_BINARY_DIRECTORY)/$(OUTPUT_FILENAME)
+	$(ECHO)$(CC) $(LDFLAGS) $(OBJECTS) $(LIBS) -o $(OUTPUT_BINARY_DIRECTORY)/$(OUTPUT_FILENAME)
 
 release: CFLAGS += -DNDEBUG -O3
 release: ASMFLAGS += -DNDEBUG -O3
 release: LDFLAGS += -O3
 release: $(BUILD_DIRECTORIES) $(OBJECTS)
 	@echo [RELEASE]Linking target: $(OUTPUT_FILENAME)
+	@echo [RELEASE]CFLAGS=$(CFLAGS)
 	$(ECHO)$(CC) $(LDFLAGS) $(OBJECTS) $(LIBS) -o $(OUTPUT_BINARY_DIRECTORY)/$(OUTPUT_FILENAME)
 
 # Create build directories
