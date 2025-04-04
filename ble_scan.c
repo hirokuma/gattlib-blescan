@@ -20,7 +20,7 @@
  *
  */
 
-#define _POSIX_C_SOURCE 200809L	// strdup()
+#define _POSIX_C_SOURCE (200809L)   // for strdup()
 
 #include <pthread.h>
 #include <stdio.h>
@@ -29,13 +29,10 @@
 #include <string.h>
 #include <sys/queue.h>
 
-#ifdef GATTLIB_LOG_BACKEND_SYSLOG
-#include <syslog.h>
-#endif
-
 #include "gattlib.h"
 
-#define BLE_SCAN_TIMEOUT   10
+#define BLE_SCAN_TIMEOUT    (10)
+#define CONNECT_DEVICE_NAME "Local" // この名前の機器にだけ接続する
 
 static const char *adapter_name;
 
@@ -48,17 +45,21 @@ struct connection_t {
     gattlib_adapter_t *adapter;
     char *addr;
     LIST_ENTRY(connection_t) entries;
+    pthread_mutex_t done_mutex;
+    pthread_cond_t done_cond;
+    bool is_done;
 };
 
-static void on_device_connect(gattlib_adapter_t *adapter, const char *dst, gattlib_connection_t *connection, int error, void *user_data)
+static void on_device_connect(gattlib_adapter_t *adapter, const char *dst, gattlib_connection_t *conn, int error, void *user_data)
 {
     gattlib_primary_service_t *services;
     gattlib_characteristic_t *characteristics;
     int services_count, characteristics_count;
     char uuid_str[MAX_LEN_UUID_STR + 1];
     int ret, i;
+    struct connection_t *connection = (struct connection_t *)user_data;
 
-    ret = gattlib_discover_primary(connection, &services, &services_count);
+    ret = gattlib_discover_primary(conn, &services, &services_count);
     if (ret != 0) {
         GATTLIB_LOG(GATTLIB_ERROR, "Fail to discover primary services.");
         goto disconnect_exit;
@@ -73,7 +74,7 @@ static void on_device_connect(gattlib_adapter_t *adapter, const char *dst, gattl
     }
     free(services);
 
-    ret = gattlib_discover_char(connection, &characteristics, &characteristics_count);
+    ret = gattlib_discover_char(conn, &characteristics, &characteristics_count);
     if (ret != 0) {
         GATTLIB_LOG(GATTLIB_ERROR, "Fail to discover characteristics.");
         goto disconnect_exit;
@@ -88,7 +89,16 @@ static void on_device_connect(gattlib_adapter_t *adapter, const char *dst, gattl
     free(characteristics);
 
 disconnect_exit:
-    gattlib_disconnect(connection, false /* wait_disconnection */);
+    ret = gattlib_disconnect(conn, true /* wait_disconnection */);
+    if (ret != GATTLIB_SUCCESS) {
+        GATTLIB_LOG(GATTLIB_ERROR, "Failed to disconnect from the bluetooth device '%s'(ret=%d)", connection->addr, ret);
+    }
+
+    // Signal that we're done
+    pthread_mutex_lock(&connection->done_mutex);
+    connection->is_done = true;
+    pthread_cond_signal(&connection->done_cond);
+    pthread_mutex_unlock(&connection->done_mutex);
 }
 
 static void *ble_connect_device(void *arg)
@@ -100,10 +110,17 @@ static void *ble_connect_device(void *arg)
     pthread_mutex_lock(&g_mutex);
     printf("------------START %s ---------------\n", addr);
 
-    ret = gattlib_connect(connection->adapter, connection->addr, GATTLIB_CONNECTION_OPTIONS_NONE, on_device_connect, NULL);
+    ret = gattlib_connect(connection->adapter, connection->addr, GATTLIB_CONNECTION_OPTIONS_NONE, on_device_connect, connection);
     if (ret != GATTLIB_SUCCESS) {
-        GATTLIB_LOG(GATTLIB_ERROR, "Failed to connect to the bluetooth device '%s'", connection->addr);
+        GATTLIB_LOG(GATTLIB_ERROR, "Failed to connect to the bluetooth device '%s'(ret=%d)", connection->addr, ret);
     }
+
+    // Wait for the on_device_connect to complete
+    pthread_mutex_lock(&connection->done_mutex);
+    while (!connection->is_done) {
+        pthread_cond_wait(&connection->done_cond, &connection->done_mutex);
+    }
+    pthread_mutex_unlock(&connection->done_mutex);
 
     printf("------------DONE %s ---------------\n", addr);
     pthread_mutex_unlock(&g_mutex);
@@ -117,9 +134,13 @@ static void ble_discovered_device(gattlib_adapter_t *adapter, const char *addr, 
 
     if (name) {
         printf("Discovered %s - '%s'\n", addr, name);
-        if (strcmp(name, "Local") != 0) {
+#ifdef CONNECT_DEVICE_NAME
+        if (strcmp(name, CONNECT_DEVICE_NAME) != 0) {
             return;
         }
+#else
+        return;
+#endif
     } else {
         printf("Discovered %s\n", addr);
         return;
@@ -132,6 +153,9 @@ static void ble_discovered_device(gattlib_adapter_t *adapter, const char *addr, 
     }
     connection->addr = strdup(addr);
     connection->adapter = adapter;
+    connection->is_done = false;
+    pthread_mutex_init(&connection->done_mutex, NULL);
+    pthread_cond_init(&connection->done_cond, NULL);
 
     ret = pthread_create(&connection->thread, NULL,	ble_connect_device, connection);
     if (ret != 0) {
@@ -171,6 +195,8 @@ static void *ble_task(void *arg)
         pthread_join(connection->thread, NULL);
         LIST_REMOVE(g_ble_connections.lh_first, entries);
         free(connection->addr);
+        pthread_mutex_destroy(&connection->done_mutex);
+        pthread_cond_destroy(&connection->done_cond);
         free(connection);
     }
 
@@ -191,11 +217,6 @@ int main(int argc, const char *argv[])
         printf("%s [<bluetooth-adapter>]\n", argv[0]);
         return 1;
     }
-
-#ifdef GATTLIB_LOG_BACKEND_SYSLOG
-    openlog("gattlib_ble_scan", LOG_CONS | LOG_NDELAY | LOG_PERROR, LOG_USER);
-    setlogmask(LOG_UPTO(LOG_INFO));
-#endif
 
     LIST_INIT(&g_ble_connections);
 
