@@ -28,10 +28,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/queue.h>
+#include <time.h>
 
 #include "gattlib.h"
 
-#define BLE_SCAN_TIMEOUT    (10)
+#define CONN_RETRY_COUNT    (5)
+#define BLE_SCAN_TIMEOUT    (3)
 #define CONNECT_DEVICE_NAME "Local" // この名前の機器にだけ接続する
 
 static const char *adapter_name;
@@ -58,6 +60,14 @@ static void on_device_connect(gattlib_adapter_t *adapter, const char *dst, gattl
     char uuid_str[MAX_LEN_UUID_STR + 1];
     int ret, i;
     struct connection_t *connection = (struct connection_t *)user_data;
+
+    if (conn == NULL) {
+        // The gattlib_connect() callback function should be called
+        // when the connection is established, but it will be called
+        // even if the connection fails.
+        GATTLIB_LOG(GATTLIB_ERROR, "Fail to connect device.");
+        return;
+    }
 
     ret = gattlib_discover_primary(conn, &services, &services_count);
     if (ret != 0) {
@@ -110,9 +120,31 @@ static void *ble_connect_device(void *arg)
     pthread_mutex_lock(&g_mutex);
     printf("------------START %s ---------------\n", addr);
 
-    ret = gattlib_connect(connection->adapter, connection->addr, GATTLIB_CONNECTION_OPTIONS_NONE, on_device_connect, connection);
-    if (ret != GATTLIB_SUCCESS) {
-        GATTLIB_LOG(GATTLIB_ERROR, "Failed to connect to the bluetooth device '%s'(ret=%d)", connection->addr, ret);
+    int retry = CONN_RETRY_COUNT;
+    while (retry--) {
+        ret = gattlib_connect(connection->adapter, connection->addr, GATTLIB_CONNECTION_OPTIONS_NONE, on_device_connect, connection);
+        if (ret != GATTLIB_SUCCESS) {
+            GATTLIB_LOG(GATTLIB_ERROR, "[retry=%d] Failed to connect to the bluetooth device '%s'(ret=%d)", retry, connection->addr, ret);
+            struct timespec duration = {
+                .tv_sec = 1,
+                .tv_nsec = 0,
+            };
+            nanosleep(&duration, NULL);
+            continue;
+        }
+        break;
+    }
+    if (retry == -1) {
+        GATTLIB_LOG(GATTLIB_ERROR, "Failed to connect to the bluetooth device '%s'", connection->addr);
+
+        // Signal that we're done
+        pthread_mutex_lock(&connection->done_mutex);
+        connection->is_done = true;
+        pthread_cond_signal(&connection->done_cond);
+        pthread_mutex_unlock(&connection->done_mutex);
+
+        pthread_mutex_unlock(&g_mutex);
+        return NULL;
     }
 
     // Wait for the on_device_connect to complete
@@ -184,7 +216,11 @@ static void *ble_task(void *arg)
         goto EXIT;
     }
 
-    gattlib_adapter_scan_disable(adapter);
+    ret = gattlib_adapter_scan_disable(adapter);
+    if (ret) {
+        GATTLIB_LOG(GATTLIB_ERROR, "Failed to stop scanning.");
+        goto EXIT;
+    }
 
     puts("Scan completed");
     pthread_mutex_unlock(&g_mutex);
